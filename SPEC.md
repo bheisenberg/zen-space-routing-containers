@@ -39,7 +39,9 @@ If the Rule Container no longer exists (deleted via Settings → Container Tabs)
 
 ## UI spec
 
-Extends the existing Space Routing Settings dialog (opened via a Space's three-dot menu). Each rule row currently has a URL match row and an "open in" Space row. Add a third control to the "open in" row: a container `menulist` populated from `ContextualIdentityService.getPublicIdentities()` (name + icon), with a leading "Space Default" sentinel option selected when the rule has no Rule Container set. Selecting a container writes it to the rule; selecting "Space Default" clears it back to the sentinel (`null`).
+Extends the existing Space Routing Settings dialog (opened via a Space's three-dot menu). Each rule already has a URL-match row and an "open in" Space row. The container picker is a second `menulist` added directly onto that *same* "open in" row, right after the Space dropdown — not a separate labeled row. This keeps the two controls vertically aligned for free (both sit in the same flex row) and gives them the identical native dropdown arrow automatically, since both are plain `<menulist class="select">` elements sharing the same widget and base styling. A leading "Space Default" sentinel option is selected when the rule has no Rule Container set; picking a real container writes it to the rule, picking "Space Default" clears it back to `null`.
+
+Container menu items show the container's real icon and color, using Firefox's own container-icon convention (`identity-icon-<icon>` / `identity-color-<color>` classes plus `data-usercontextid`, the same classes the native tab context menu and "Open New Container Tab" panel use) rather than plain text — this requires explicitly loading `chrome://browser/content/usercontext/usercontext.css` into the dialog, since it isn't one of the stylesheets the dialog loads by default.
 
 No inline container creation — pick from existing containers only, same as the Space-container assignment UI already does.
 
@@ -58,12 +60,28 @@ Verified against the actual `zen-browser/desktop` source (cloned and inspected f
 **Patch points**:
 
 1. `gZenSpaceRoutingManager.onBeforeAddTab` — wrap it: call the original to get its result, and if `isRouteFound` is true, independently re-find the matching route (via the already-public `getAllRoutes()` + `isRouteMatching()`) to read its `containerTabId`. If set and `ContextualIdentityService` confirms it still exists, override `result.userContextId` with it; otherwise leave the original Space-default result untouched.
-2. `gZenSpaceRoutingManager.getEmptyRoute` — wrap it to add `containerTabId: null` to the returned object, so new rules get the field.
-3. `nsZenSpaceRoutingDialog.prototype.createRouteElement` — wrap it: call the original (builds the existing two rows), then append the container `menulist` described in the UI spec, wire its `command` event to read/write `route.containerTabId` via the existing public `gZenSpaceRoutingManager.getRoute()` / `updateRoute()`.
 
-No patch needed to `tabbrowser.js` itself, to rule matching/ordering, or to storage — `JSONFile` persists whatever shape the route objects have.
+   This alone is **not sufficient** — see patch 2.
+
+2. `gBrowser.addTab` (per window, not an ESM singleton like the others — patched on each window's own `gBrowser` instance as that window loads). `tabbrowser.js`'s `addTab()` only consults `onBeforeAddTab`'s resolved container when the caller already passed a `userContextId`:
+   ```js
+   if (beforeRouteResult.isRouteFound && typeof userContextId !== "undefined") {
+     userContextId = beforeRouteResult.userContextId;
+   } else if (typeof gZenWorkspaces !== "undefined" ...) {
+     [userContextId, ...] = gZenWorkspaces.getContextIdIfNeeded(userContextId, fromExternal, triggeringPrincipal);
+   }
+   ```
+   Most routed navigations — typed URLs, plain link clicks — reach `addTab()` with **no** `userContextId` at all (e.g. `ZenSpaceRoutingNavigation` pulls an in-place typed-URL navigation out into `gBrowser.addTab(url, { triggeringPrincipal, ownerTab })`, nothing else). That falls into the `else if` branch, which calls `getContextIdIfNeeded()` — a function that doesn't know about routing at all and just returns whichever container the *currently active* Space already has. Patch 1's result is silently ignored for this, the most common, case.
+
+   The fix: wrap `gBrowser.addTab` itself to pre-fill `options.userContextId` from the matching rule's container *before* calling the original, whenever the caller didn't already specify one (and the tab isn't pinned/grouped/mid-session-restore). That's enough to flip the original code into the branch that reads `beforeRouteResult.userContextId` — which patch 1 has already made correct.
+
+3. `gZenSpaceRoutingManager.getEmptyRoute` — wrap it to add `containerTabId: null` to the returned object, so new rules get the field.
+4. `nsZenSpaceRoutingDialog.prototype.createRouteElement` — wrap it: call the original (builds the existing two rows), then append the container `menulist` described in the UI spec, wire its `command` event to read/write `route.containerTabId` via the existing public `gZenSpaceRoutingManager.getRoute()` / `updateRoute()`.
+
+No patch needed to rule matching/ordering, or to storage — `JSONFile` persists whatever shape the route objects have.
 
 ## Open risks
 
 - This relies on undocumented Zen internals (`ZenSpaceRoutingManager.sys.mjs`, `ZenSpaceRoutingDialog.mjs`). A future Zen release could rename/restructure either file and silently break the patch. Since it's a local, unpublished script, breakage just means the mod stops working until updated — not a security or data-loss risk.
 - `ContextualIdentityService`'s exact lookup method for "does this userContextId still exist" should be confirmed against the running Firefox version at implementation time rather than assumed from this spec.
+- The container-icon classes and `chrome://browser/content/usercontext/usercontext.css` path are verified against Firefox/Gecko's source, not against a running Zen instance (no Zen install available in the environment this was built in) — visually confirm the icons render and the picker fits the dialog's fixed 510px width as expected.
