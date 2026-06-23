@@ -54,7 +54,15 @@ function collectMismatches() {
     );
 
     for (const tab of pinnedTabs) {
-      const url = tab.linkedBrowser?.currentURI?.spec ?? "(unknown url)";
+      // A pinned tab's "home" URL is tab._zenPinnedInitialState.entry.url,
+      // not necessarily wherever it currently happens to be sitting
+      // (currentURI.spec) - same fallback chain Zen's own editPinnedUrl()
+      // uses. Reopening at currentURI for every pinned tab is what
+      // scrambled URLs the first time around.
+      const url =
+        tab._zenPinnedInitialState?.entry?.url ??
+        tab.linkedBrowser?.currentURI?.spec ??
+        "(unknown url)";
 
       try {
         const workspaceId = tab.getAttribute("zen-workspace-id");
