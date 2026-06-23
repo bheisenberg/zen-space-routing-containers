@@ -145,60 +145,75 @@ function patchEmptyRouteShape() {
   };
 }
 
-// Container picker lives on the *same* row as the existing "open in" Space
-// dropdown, right after it - not a separate labeled row. Both are plain
-// <menulist class="select"> elements, so they share the exact same native
-// arrow/widget styling automatically; putting them on one row also means
-// they're vertically aligned for free via .sr-rule-row's flex layout.
+// Firefox's own container icon/color resources (the same ones the tab
+// context menu and "Open New Container Tab" panel use).
+const IDENTITY_COLORS = {
+  blue: "#37adff",
+  turquoise: "#00c79a",
+  green: "#51cd00",
+  yellow: "#ffcb00",
+  orange: "#ff9f00",
+  red: "#ff613d",
+  pink: "#ff4bda",
+  purple: "#af51f5",
+  toolbar: "currentColor",
+};
+
+function containerIconUrl(icon) {
+  return `resource://usercontext-content/${icon}.svg`;
+}
+
+// The container picker gets its own row, directly below "open in" - cramming
+// it onto the same row overflowed the dialog's fixed 510px width and wrapped
+// "open in" onto two lines. To still line up under the Space dropdown (not
+// under its icon+label), the row starts with an invisible clone of that
+// icon+label: same markup/classes, so the widths match exactly by
+// construction instead of a guessed margin. Reusing "sr-rule-bottom" for the
+// row's own class gives it the identical 87px offset for free, and reusing
+// "open-in-select" for the menulist's width keeps both dropdowns the same
+// size, so the two rows read as one aligned control group.
 function patchSettingsDialog() {
   const originalCreateRouteElement =
     nsZenSpaceRoutingDialog.prototype.createRouteElement;
 
   nsZenSpaceRoutingDialog.prototype.createRouteElement = function (route) {
     const root = originalCreateRouteElement.call(this, route);
-    ensureUserContextStylesheet(this.doc);
     addContainerPicker(this.doc, root, route);
     return root;
   };
 }
 
-// usercontext.css (the stylesheet that defines .identity-icon-* /
-// .identity-color-* and makes [data-usercontextid] menuitems render their
-// container icon) isn't one of the stylesheets the Space Routing dialog
-// loads by default, so it has to be added explicitly.
-function ensureUserContextStylesheet(doc) {
-  const href = "chrome://browser/content/usercontext/usercontext.css";
-  if (doc.querySelector(`link[href="${href}"]`)) {
-    return;
-  }
-  const link = doc.createElementNS("http://www.w3.org/1999/xhtml", "link");
-  link.setAttribute("rel", "stylesheet");
-  link.setAttribute("href", href);
-  (doc.querySelector("linkset") ?? doc.documentElement).appendChild(link);
-}
-
 function addContainerPicker(doc, root, route) {
-  const bottomRow = root.querySelector(".sr-rule-bottom");
+  const spaceLabelContainer = root.querySelector(
+    ".sr-rule-bottom .sr-label-container"
+  );
+
+  const containerRow = doc.createXULElement("hbox");
+  containerRow.className = "sr-rule-row sr-rule-bottom sr-rule-container-row";
+
+  const spacer = spaceLabelContainer.cloneNode(true);
+  spacer.style.visibility = "hidden";
 
   const containerMenulist = doc.createXULElement("menulist");
-  containerMenulist.className = "select container-select";
-  // .select defaults to 150px; narrower here so it fits next to
-  // open-in-select (165px) within the dialog's fixed 510px width.
-  containerMenulist.style.width = "120px";
+  containerMenulist.className = "select open-in-select container-select";
   containerMenulist.setAttribute("tooltiptext", "Container override");
 
   const containerMenupopup = doc.createXULElement("menupopup");
   containerMenulist.appendChild(containerMenupopup);
 
   populateContainerList(doc, containerMenupopup);
-  containerMenulist.value =
+  setSelectedContainer(
+    containerMenulist,
     typeof route.containerTabId === "number"
       ? String(route.containerTabId)
-      : SPACE_DEFAULT_SENTINEL;
+      : SPACE_DEFAULT_SENTINEL
+  );
 
-  bottomRow.append(containerMenulist);
+  containerRow.append(spacer, containerMenulist);
+  root.append(containerRow);
 
   containerMenulist.addEventListener("command", (e) => {
+    setSelectedContainer(e.target, e.target.value);
     onContainerChange(e.target.value, route.id);
   });
 }
@@ -218,18 +233,44 @@ function populateContainerList(doc, popupElement) {
       identity.name;
     item.setAttribute("label", label);
     item.setAttribute("value", String(identity.userContextId));
-    // Firefox's own container-icon convention (same classes/attribute the
-    // tab context menu and "Open New Container Tab" panel use): these two
-    // classes set the --identity-icon / --identity-icon-color custom
-    // properties that usercontext.css's [data-usercontextid] rule reads.
-    item.setAttribute("data-usercontextid", String(identity.userContextId));
-    item.classList.add(
-      "menuitem-iconic",
-      `identity-icon-${identity.icon}`,
-      `identity-color-${identity.color}`
-    );
+    item.setAttribute("class", "menuitem-iconic");
+    item.setAttribute("image", containerIconUrl(identity.icon));
+    item.style.color = IDENTITY_COLORS[identity.color] || "currentColor";
     popupElement.appendChild(item);
   }
+}
+
+// <menulist> doesn't automatically mirror a class-driven icon from its
+// selected <menuitem> onto its own closed/collapsed display - Zen's own
+// "open in" dropdown works around this the same way: by setting the `image`
+// attribute (and here, color) directly on the <menulist> itself. The
+// existing `menulist[image]::part(icon) { fill: currentColor; ... }` rule
+// in zen-space-routing.css then renders it, picking up our inline color.
+function setSelectedContainer(menulist, value) {
+  menulist.value = value;
+
+  if (value === SPACE_DEFAULT_SENTINEL) {
+    menulist.removeAttribute("image");
+    menulist.style.color = "";
+    return;
+  }
+
+  let identity;
+  try {
+    identity = ContextualIdentityService.getPublicIdentityFromId(
+      parseInt(value, 10)
+    );
+  } catch {
+    identity = null;
+  }
+  if (!identity) {
+    menulist.removeAttribute("image");
+    menulist.style.color = "";
+    return;
+  }
+
+  menulist.setAttribute("image", containerIconUrl(identity.icon));
+  menulist.style.color = IDENTITY_COLORS[identity.color] || "currentColor";
 }
 
 function onContainerChange(value, routeId) {

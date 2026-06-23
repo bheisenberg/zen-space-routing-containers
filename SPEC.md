@@ -39,9 +39,16 @@ If the Rule Container no longer exists (deleted via Settings → Container Tabs)
 
 ## UI spec
 
-Extends the existing Space Routing Settings dialog (opened via a Space's three-dot menu). Each rule already has a URL-match row and an "open in" Space row. The container picker is a second `menulist` added directly onto that *same* "open in" row, right after the Space dropdown — not a separate labeled row. This keeps the two controls vertically aligned for free (both sit in the same flex row) and gives them the identical native dropdown arrow automatically, since both are plain `<menulist class="select">` elements sharing the same widget and base styling. A leading "Space Default" sentinel option is selected when the rule has no Rule Container set; picking a real container writes it to the rule, picking "Space Default" clears it back to `null`.
+Extends the existing Space Routing Settings dialog (opened via a Space's three-dot menu). Each rule already has a URL-match row and an "open in" Space row. The container picker is its **own** row directly below "open in" (cramming it onto the same row overflowed the dialog's fixed 510px width and wrapped "open in" onto two lines). It still reads as one aligned control group with the Space dropdown above it:
 
-Container menu items show the container's real icon and color, using Firefox's own container-icon convention (`identity-icon-<icon>` / `identity-color-<color>` classes plus `data-usercontextid`, the same classes the native tab context menu and "Open New Container Tab" panel use) rather than plain text — this requires explicitly loading `chrome://browser/content/usercontext/usercontext.css` into the dialog, since it isn't one of the stylesheets the dialog loads by default.
+- The row reuses the `sr-rule-bottom` class, giving it the exact same left offset as the "open in" row.
+- It starts with an invisible clone of the "open in" row's icon+label element (same markup, `visibility: hidden`), so the container dropdown's left edge lines up under the Space dropdown's left edge by construction, not a guessed margin value.
+- The menulist reuses the `open-in-select` width class, so both dropdowns are the same size.
+- Both are plain `<menulist class="select">` elements, so they get the identical native dropdown arrow automatically.
+
+A leading "Space Default" sentinel option is selected when the rule has no Rule Container set; picking a real container writes it to the rule, picking "Space Default" clears it back to `null`.
+
+Container menu items show the container's real icon and color using the same mechanism Zen's own "open in" dropdown already uses in this exact dialog (`class="menuitem-iconic"` + an `image` attribute pointing at `resource://usercontext-content/<icon>.svg`, plus an inline `color` so the existing `menulist[image]::part(icon) { fill: currentColor; ... }` rule in `zen-space-routing.css` picks up the container's real color) — not Firefox's separate `identity-icon-*`/`usercontext.css` convention, which doesn't get mirrored onto a `<menulist>`'s own closed/collapsed display automatically. Because of that, the closed menulist's `image`/`color` are also re-applied explicitly whenever the selection changes, not left to any implicit menuitem→menulist syncing.
 
 No inline container creation — pick from existing containers only, same as the Space-container assignment UI already does.
 
@@ -84,4 +91,4 @@ No patch needed to rule matching/ordering, or to storage — `JSONFile` persists
 
 - This relies on undocumented Zen internals (`ZenSpaceRoutingManager.sys.mjs`, `ZenSpaceRoutingDialog.mjs`). A future Zen release could rename/restructure either file and silently break the patch. Since it's a local, unpublished script, breakage just means the mod stops working until updated — not a security or data-loss risk.
 - `ContextualIdentityService`'s exact lookup method for "does this userContextId still exist" should be confirmed against the running Firefox version at implementation time rather than assumed from this spec.
-- The container-icon classes and `chrome://browser/content/usercontext/usercontext.css` path are verified against Firefox/Gecko's source, not against a running Zen instance (no Zen install available in the environment this was built in) — visually confirm the icons render and the picker fits the dialog's fixed 510px width as expected.
+- The `resource://usercontext-content/<icon>.svg` paths and `--identity-color-*` hex values are verified against Firefox/Gecko's source, not against a running Zen instance — visually confirm the icon colors match Zen's own container colors exactly.
