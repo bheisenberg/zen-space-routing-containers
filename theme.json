@@ -6,6 +6,7 @@
   "author": "bheisenberg95",
   "homepage": "bheisenberg/zen-space-routing-containers",
   "scripts": {
-    "space-routing-containers.uc.mjs": {}
+    "space-routing-containers.uc.mjs": {},
+    "pinned-tab-container-fix.uc.mjs": {}
   }
 }
