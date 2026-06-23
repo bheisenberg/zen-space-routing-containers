@@ -174,11 +174,19 @@ function ensureIconColorStylesheet(doc) {
   if (doc.getElementById("zsr-icon-color-style")) {
     return;
   }
-  const style = doc.createElementNS("http://www.w3.org/1999/xhtml", "style");
-  style.id = "zsr-icon-color-style";
-  style.textContent =
+  // This is a XUL/XHTML window, not a regular HTML document - a plain
+  // <style> element dropped into the tree is inert here (it's just inert
+  // markup, never parsed as a stylesheet). The dialog's *real* stylesheets
+  // all load via <link rel="stylesheet"> inside <linkset>, so that's the
+  // mechanism we know actually works; a data: URI gives it inline CSS
+  // without needing a separate file.
+  const css =
     ".zsr-container-icon[image]::part(icon) { fill: var(--zsr-icon-color, currentColor); }";
-  doc.documentElement.appendChild(style);
+  const link = doc.createElementNS("http://www.w3.org/1999/xhtml", "link");
+  link.id = "zsr-icon-color-style";
+  link.setAttribute("rel", "stylesheet");
+  link.setAttribute("href", `data:text/css,${encodeURIComponent(css)}`);
+  (doc.querySelector("linkset") ?? doc.documentElement).appendChild(link);
 }
 
 // The container picker gets its own row, directly below "open in" - cramming
