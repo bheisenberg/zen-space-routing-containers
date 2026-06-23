@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR 0003
 ---
 
 # Rule Container takes precedence over Explicit Container

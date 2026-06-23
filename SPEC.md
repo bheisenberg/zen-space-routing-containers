@@ -1,6 +1,6 @@
 # Zen Space Routing Containers — Spec
 
-Terminology used below is defined in [CONTEXT.md](./CONTEXT.md). Key decisions are recorded in [docs/adr/0001-rule-container-precedence.md](./docs/adr/0001-rule-container-precedence.md) and [docs/adr/0002-delivery-via-js-loader-not-zen-mods.md](./docs/adr/0002-delivery-via-js-loader-not-zen-mods.md).
+Terminology used below is defined in [CONTEXT.md](./CONTEXT.md). Key decisions are recorded in [docs/adr/0002-delivery-via-js-loader-not-zen-mods.md](./docs/adr/0002-delivery-via-js-loader-not-zen-mods.md) and [docs/adr/0003-explicit-container-wins-over-rule-container.md](./docs/adr/0003-explicit-container-wins-over-rule-container.md) (which supersedes the original precedence call in [0001](./docs/adr/0001-rule-container-precedence.md)).
 
 ## Problem
 
@@ -20,18 +20,20 @@ Let a Routing Rule optionally specify a Rule Container. When set, every navigati
 
 ### Resolution order, when a rule matches
 
-1. **Rule Container**, if the rule has one set and it still exists.
-2. **Space Default Container** of the rule's target Space, otherwise (rule has no container set, or its container was deleted).
+1. **Explicit Container**, if the tab/navigation already has one (a pinned tab's own container, a bookmark's "Open Link in Container", a context-menu override, etc.) — see ADR 0003. The Space move still happens; only the container is left untouched.
+2. **Rule Container**, otherwise, if the rule has one set and it still exists.
+3. **Space Default Container** of the rule's target Space, otherwise (rule has no container set, or its container was deleted).
 
-This applies even if the navigation already carried an Explicit Container (e.g. a bookmark's own "Open Link in Container" setting) — seeAdr 0001. If no rule matches, behavior is entirely unchanged (Explicit Container, then Space default, then most-recent-space fallback).
+If no rule matches, behavior is entirely unchanged (Explicit Container, then Space default, then most-recent-space fallback).
 
 ### Worked example
 
 A rule: `youtube.com` (contains) → Personal Space, Gaming container.
 
-- Typing `youtube.com` in the address bar → Personal Space, Gaming container.
-- Clicking a bookmark for `youtube.com` that has its own Explicit Container set to "Work" → still Personal Space, Gaming container (rule wins).
-- Clicking a `youtube.com` link from another app → Personal Space, Gaming container (external links already route the same way internally).
+- Typing `youtube.com` in the address bar (no Explicit Container) → Personal Space, Gaming container.
+- Clicking a bookmark for `youtube.com` that has its own Explicit Container set to "Work" → Personal Space, **Work** container (the bookmark's own choice wins; only the Space comes from the rule).
+- A pinned tab whose own container is "Work" navigating/reopening on a URL this rule matches → stays in its own Work container, same reasoning.
+- Clicking a `youtube.com` link from another app, with no explicit container of its own → Personal Space, Gaming container (external links already route the same way internally).
 
 ### Missing container fallback
 
@@ -74,7 +76,7 @@ Verified against the actual `zen-browser/desktop` source (cloned and inspected f
 
 **Patch points**:
 
-1. `gZenSpaceRoutingManager.onBeforeAddTab` — wrap it: call the original to get its result, and if `isRouteFound` is true, independently re-find the matching route (via the already-public `getAllRoutes()` + `isRouteMatching()`) to read its `containerTabId`. If set and `ContextualIdentityService` confirms it still exists, override `result.userContextId` with it; otherwise leave the original Space-default result untouched.
+1. `gZenSpaceRoutingManager.onBeforeAddTab` — wrap it: call the original to get its result. If `isRouteFound` is false, return as-is. Otherwise, check the handoff flag set by patch 2 (`__zsrHasExplicitContainer`): if the navigation already had an explicit container, set `result.isRouteFound = false` and return — this is what stops the outer `addTab()` logic (below) from overwriting an explicit choice, while leaving `targetRoute` untouched so the Space move (read separately by `onAfterAddTab`) still happens. Otherwise, independently re-find the matching route (via the already-public `getAllRoutes()` + `isRouteMatching()`) to read its `containerTabId`; if set and `ContextualIdentityService` confirms it still exists, override `result.userContextId` with it.
 
    This alone is **not sufficient** — see patch 2.
 
@@ -88,7 +90,7 @@ Verified against the actual `zen-browser/desktop` source (cloned and inspected f
    ```
    Most routed navigations — typed URLs, plain link clicks — reach `addTab()` with **no** `userContextId` at all (e.g. `ZenSpaceRoutingNavigation` pulls an in-place typed-URL navigation out into `gBrowser.addTab(url, { triggeringPrincipal, ownerTab })`, nothing else). That falls into the `else if` branch, which calls `getContextIdIfNeeded()` — a function that doesn't know about routing at all and just returns whichever container the *currently active* Space already has. Patch 1's result is silently ignored for this, the most common, case.
 
-   The fix: wrap `gBrowser.addTab` itself to pre-fill `options.userContextId` from the matching rule's container *before* calling the original, whenever the caller didn't already specify one (and the tab isn't pinned/grouped/mid-session-restore). That's enough to flip the original code into the branch that reads `beforeRouteResult.userContextId` — which patch 1 has already made correct.
+   The fix: wrap `gBrowser.addTab` itself to pre-fill `options.userContextId` from the matching rule's container *before* calling the original, whenever the caller didn't already specify one (and the tab isn't pinned/grouped/mid-session-restore). That's enough to flip the original code into the branch that reads `beforeRouteResult.userContextId` — which patch 1 has already made correct. This wrapper also records whether the caller passed an explicit `userContextId` into `gZenSpaceRoutingManager.__zsrHasExplicitContainer` immediately before calling the original `addTab` (which calls `onBeforeAddTab` synchronously, with no `await` in between — JS's single-threaded execution makes this handoff safe), clearing it again once `addTab` returns. `onBeforeAddTab`'s own `options` parameter doesn't include `userContextId` at all (`tabbrowser.js` doesn't forward it), so this is the only way patch 1 can know an explicit container was already present.
 
 3. `gZenSpaceRoutingManager.getEmptyRoute` — wrap it to add `containerTabId: null` to the returned object, so new rules get the field.
 4. `nsZenSpaceRoutingDialog.prototype.createRouteElement` — wrap it: call the original (builds the existing two rows), then append the container `menulist` described in the UI spec, wire its `command` event to read/write `route.containerTabId` via the existing public `gZenSpaceRoutingManager.getRoute()` / `updateRoute()`.

@@ -1,6 +1,7 @@
 // Adds a per-rule container override to Zen's native Space Routing.
-// See SPEC.md for the full behavior spec, and docs/adr/ for the
-// precedence (0001) and delivery-mechanism (0002) decisions this follows.
+// See SPEC.md for the full behavior spec, and docs/adr/ for the precedence
+// (0001, superseded by 0003) and delivery-mechanism (0002) decisions this
+// follows.
 
 const { gZenSpaceRoutingManager } = ChromeUtils.importESModule(
   "resource:///modules/zen/spacerouting/ZenSpaceRoutingManager.sys.mjs"
@@ -59,10 +60,14 @@ function findMatchingRoute(uriString) {
   return null;
 }
 
-// ADR 0001: the Rule Container, when set and still valid, wins over both
-// the Space Default Container and any Explicit Container the navigation
-// already carried. A missing/deleted Rule Container falls back to
-// whatever the original logic already resolved (the Space default).
+// ADR 0003 (supersedes ADR 0001): if the tab/navigation already has its own
+// container - pinned tabs being the case that surfaced the bug, but this
+// covers any explicit choice (bookmarks, "Open Link in Container", etc.) -
+// that wins, full stop. The Rule Container only fills in when nothing else
+// already decided. onBeforeAddTab itself has no visibility into whether the
+// caller passed an explicit userContextId (tabbrowser.js doesn't forward it
+// into the options object it builds), so patchAddTabForWindow stashes that
+// fact here for the synchronous duration of the addTab() call it triggers.
 function patchContainerResolution() {
   const originalOnBeforeAddTab =
     gZenSpaceRoutingManager.onBeforeAddTab.bind(gZenSpaceRoutingManager);
@@ -70,16 +75,28 @@ function patchContainerResolution() {
   gZenSpaceRoutingManager.onBeforeAddTab = function (uriString, options, win) {
     const result = originalOnBeforeAddTab(uriString, options, win);
 
-    if (result.isRouteFound) {
-      const route = findMatchingRoute(uriString);
-      const ruleContainerId = route?.containerTabId;
+    if (!result.isRouteFound) {
+      return result;
+    }
 
-      if (
-        typeof ruleContainerId === "number" &&
-        containerStillExists(ruleContainerId)
-      ) {
-        result.userContextId = ruleContainerId;
-      }
+    if (gZenSpaceRoutingManager.__zsrHasExplicitContainer) {
+      // tabbrowser.js only overwrites userContextId with this result's
+      // value when isRouteFound is true, so clearing it here is what makes
+      // the tab's own container choice stick instead. targetRoute (read
+      // separately by onAfterAddTab) is untouched, so the tab still moves
+      // to the rule's target Space - only the container is left alone.
+      result.isRouteFound = false;
+      return result;
+    }
+
+    const route = findMatchingRoute(uriString);
+    const ruleContainerId = route?.containerTabId;
+
+    if (
+      typeof ruleContainerId === "number" &&
+      containerStillExists(ruleContainerId)
+    ) {
+      result.userContextId = ruleContainerId;
     }
 
     return result;
@@ -108,9 +125,11 @@ function patchAddTabForWindow(win) {
   const originalAddTab = gBrowser.addTab.bind(gBrowser);
 
   gBrowser.addTab = function (uriString, options = {}) {
+    const hasExplicitContainer = typeof options.userContextId !== "undefined";
+
     if (
+      !hasExplicitContainer &&
       typeof uriString === "string" &&
-      typeof options.userContextId === "undefined" &&
       !options.skipRoute &&
       !options.pinned &&
       !options.tabGroup &&
@@ -127,7 +146,14 @@ function patchAddTabForWindow(win) {
       }
     }
 
-    return originalAddTab(uriString, options);
+    // Handoff to patchContainerResolution's onBeforeAddTab wrapper, called
+    // synchronously inside originalAddTab below - see ADR 0003.
+    gZenSpaceRoutingManager.__zsrHasExplicitContainer = hasExplicitContainer;
+    try {
+      return originalAddTab(uriString, options);
+    } finally {
+      gZenSpaceRoutingManager.__zsrHasExplicitContainer = false;
+    }
   };
 }
 
