@@ -1,0 +1,11 @@
+{
+  "id": "zen-space-routing-containers",
+  "name": "Space Routing Containers",
+  "description": "Lets a Space Routing rule pin matched tabs to a specific container, overriding both the destination Space's default container and any explicit container the link carries.",
+  "version": "1.0.0",
+  "author": "bheisenberg95",
+  "homepage": "REPLACE_WITH_YOUR_GITHUB_USERNAME/zen-space-routing-containers",
+  "scripts": {
+    "space-routing-containers.uc.mjs": {}
+  }
+}

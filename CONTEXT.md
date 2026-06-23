@@ -1,0 +1,25 @@
+# Zen Space Routing Containers
+
+A local-only Zen Browser mod that extends Zen's native Space Routing feature so a routing rule can pin matched tabs to a specific container, not just whatever container the destination Space defaults to.
+
+## Language
+
+**Space**:
+Zen Browser's term for a focused grouping of tabs (shown in the sidebar; Zen's own UI sometimes calls this "Workspace"). We standardize on "Space" since the feature we're extending is literally named "Space Routing."
+_Avoid_: Workspace
+
+**Routing Rule**:
+A native Zen Space Routing entry that matches a URL pattern and assigns matching tabs to a target Space. Configured via a Space's three-dot menu → "Space Routing Settings."
+_Avoid_: route, redirect
+
+**Space Default Container**:
+The container configured (via Settings → Tab Management → Workspaces, or Settings → General → Container Tabs) as the default for a given Space. Applies to a tab opened in that Space when nothing more specific overrides it.
+_Avoid_: workspace container, default container
+
+**Explicit Container**:
+A container assignment attached directly to a specific link, bookmark, or context-menu action (e.g. "Open Link in Container → X"), independent of any Space. Only takes effect when navigating via that specific link/bookmark/action — it does not apply to typed URLs or other generic navigation.
+_Avoid_: forced container, pinned container
+
+**Rule Container**:
+A container specified directly on a Routing Rule (this mod's contribution to the Routing Rule). When the rule matches, the Rule Container is applied to the tab, taking precedence over both the Space Default Container and any Explicit Container the link carries. A rule with no Rule Container set falls back to today's existing behavior.
+_Avoid_: rule's default container, override container
