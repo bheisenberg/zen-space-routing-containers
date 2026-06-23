@@ -87,6 +87,17 @@ function collectMismatches() {
           to: targetContainerId,
           essential: tab.hasAttribute("zen-essential"),
           index: tab._tPos,
+          // Captured now, before the tab is removed: its folder (if any)
+          // and Zen's custom pinned-tab name/icon. Lost these the first
+          // time around - tab.group disappears once the tab is gone, and
+          // zenStaticLabel/zenStaticIcon are plain properties on the tab
+          // element that a freshly-created replacement tab doesn't have.
+          group: tab.group ?? null,
+          zenStaticLabel:
+            typeof tab.zenStaticLabel === "string"
+              ? tab.zenStaticLabel
+              : null,
+          zenStaticIcon: tab.zenStaticIcon || null,
         });
       } catch (e) {
         errors.push({ url, error: String(e) });
@@ -128,7 +139,7 @@ function runFix(promptWindow) {
     promptWindow,
     "Pinned Tab Container Fix",
     `${mismatches.length} pinned tab(s) don't match their Space's default container:\n\n${preview}${more}\n\n` +
-      `Apply now? Each one will close and reopen pinned in the same spot with the correct container - any session tied to its current (wrong) container will be lost.`
+      `Apply now? Each one will close and reopen pinned in the same spot/folder with the correct container, keeping any custom name/icon - any session tied to its current (wrong) container will be lost.`
   );
 
   if (!proceed) {
@@ -141,7 +152,7 @@ function runFix(promptWindow) {
 
   for (const m of mismatches) {
     try {
-      m.gBrowser.addTrustedTab(m.url, {
+      const newTab = m.gBrowser.addTrustedTab(m.url, {
         pinned: true,
         essential: m.essential,
         userContextId: m.to,
@@ -149,6 +160,23 @@ function runFix(promptWindow) {
         tabIndex: m.index,
         skipAnimation: true,
       });
+
+      // Reattach folder membership and custom name/icon *before* removing
+      // the original - doing the group move first also avoids momentarily
+      // emptying (and possibly auto-removing) a folder that only had this
+      // one tab in it.
+      if (m.group) {
+        m.gBrowser.moveTabToExistingGroup(newTab, m.group);
+      }
+      if (m.zenStaticLabel !== null) {
+        newTab.zenStaticLabel = m.zenStaticLabel;
+        m.gBrowser.setTabTitle(newTab);
+      }
+      if (m.zenStaticIcon) {
+        newTab.zenStaticIcon = m.zenStaticIcon;
+        m.gBrowser.setIcon(newTab, m.zenStaticIcon);
+      }
+
       m.gBrowser.removeTab(m.tab, { animate: false, skipPermitUnload: true });
       applied.push(m);
     } catch (e) {
