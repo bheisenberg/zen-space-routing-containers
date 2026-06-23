@@ -163,6 +163,24 @@ function containerIconUrl(icon) {
   return `resource://usercontext-content/${icon}.svg`;
 }
 
+// `menulist[image]::part(icon) { fill: currentColor; }` (in
+// zen-space-routing.css) ties the icon's color to the *whole element's*
+// `color` property - setting that directly also retints the label text and
+// the dropdown arrow, which should stay the dialog's standard color, same
+// as the Space dropdown. Scoping a dedicated custom property to a rule we
+// control (only matched via our own class) lets the icon take the
+// container's color without affecting anything else on the element.
+function ensureIconColorStylesheet(doc) {
+  if (doc.getElementById("zsr-icon-color-style")) {
+    return;
+  }
+  const style = doc.createElementNS("http://www.w3.org/1999/xhtml", "style");
+  style.id = "zsr-icon-color-style";
+  style.textContent =
+    ".zsr-container-icon[image]::part(icon) { fill: var(--zsr-icon-color, currentColor); }";
+  doc.documentElement.appendChild(style);
+}
+
 // The container picker gets its own row, directly below "open in" - cramming
 // it onto the same row overflowed the dialog's fixed 510px width and wrapped
 // "open in" onto two lines. To still line up under the Space dropdown (not
@@ -184,6 +202,8 @@ function patchSettingsDialog() {
 }
 
 function addContainerPicker(doc, root, route) {
+  ensureIconColorStylesheet(doc);
+
   const spaceLabelContainer = root.querySelector(
     ".sr-rule-bottom .sr-label-container"
   );
@@ -195,7 +215,8 @@ function addContainerPicker(doc, root, route) {
   spacer.style.visibility = "hidden";
 
   const containerMenulist = doc.createXULElement("menulist");
-  containerMenulist.className = "select open-in-select container-select";
+  containerMenulist.className =
+    "select open-in-select container-select zsr-container-icon";
   containerMenulist.setAttribute("tooltiptext", "Container override");
 
   const containerMenupopup = doc.createXULElement("menupopup");
@@ -233,9 +254,12 @@ function populateContainerList(doc, popupElement) {
       identity.name;
     item.setAttribute("label", label);
     item.setAttribute("value", String(identity.userContextId));
-    item.setAttribute("class", "menuitem-iconic");
+    item.setAttribute("class", "menuitem-iconic zsr-container-icon");
     item.setAttribute("image", containerIconUrl(identity.icon));
-    item.style.color = IDENTITY_COLORS[identity.color] || "currentColor";
+    item.style.setProperty(
+      "--zsr-icon-color",
+      IDENTITY_COLORS[identity.color] || "currentColor"
+    );
     popupElement.appendChild(item);
   }
 }
@@ -243,15 +267,17 @@ function populateContainerList(doc, popupElement) {
 // <menulist> doesn't automatically mirror a class-driven icon from its
 // selected <menuitem> onto its own closed/collapsed display - Zen's own
 // "open in" dropdown works around this the same way: by setting the `image`
-// attribute (and here, color) directly on the <menulist> itself. The
-// existing `menulist[image]::part(icon) { fill: currentColor; ... }` rule
-// in zen-space-routing.css then renders it, picking up our inline color.
+// attribute directly on the <menulist> itself, picked up by the existing
+// `menulist[image]::part(icon)` rule. Color is set via the scoped
+// --zsr-icon-color custom property (see ensureIconColorStylesheet), not the
+// element's `color`, so only the icon is tinted - the label text and arrow
+// stay the dialog's standard color, same as the Space dropdown.
 function setSelectedContainer(menulist, value) {
   menulist.value = value;
 
   if (value === SPACE_DEFAULT_SENTINEL) {
     menulist.removeAttribute("image");
-    menulist.style.color = "";
+    menulist.style.removeProperty("--zsr-icon-color");
     return;
   }
 
@@ -265,12 +291,15 @@ function setSelectedContainer(menulist, value) {
   }
   if (!identity) {
     menulist.removeAttribute("image");
-    menulist.style.color = "";
+    menulist.style.removeProperty("--zsr-icon-color");
     return;
   }
 
   menulist.setAttribute("image", containerIconUrl(identity.icon));
-  menulist.style.color = IDENTITY_COLORS[identity.color] || "currentColor";
+  menulist.style.setProperty(
+    "--zsr-icon-color",
+    IDENTITY_COLORS[identity.color] || "currentColor"
+  );
 }
 
 function onContainerChange(value, routeId) {
