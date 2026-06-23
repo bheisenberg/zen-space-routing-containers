@@ -8,8 +8,8 @@ This ships as a [Sine](https://github.com/CosmoCreeper/Sine) mod, not a Zen Mod 
 
 1. Install Sine itself (one-time native installer): https://github.com/sineorg/docs/blob/main/src/installation.md
 2. In Zen, go to `about:config` and set `sine.allow-unsafe-js` to `true`. Sine only runs JS from non-store mods when this is enabled — required for any unpublished/private-repo mod, not specific to this one.
-3. Push this repo to a private (or just unlisted) GitHub repo.
-4. In Sine's settings page, install by repo: enter `<your-github-username>/zen-space-routing-containers`.
+3. This repo is already pushed to https://github.com/bheisenberg/zen-space-routing-containers (private).
+4. In Sine's settings page, install by repo: enter `bheisenberg/zen-space-routing-containers`.
 5. Restart Zen.
 
 ## Use
