@@ -1,49 +1,44 @@
-// One-time, opt-in cleanup: resets pinned tabs whose container doesn't
-// match their own Space's Space Default Container. This is a temporary
-// utility riding along on the same Sine-loaded mod, not part of its
-// ongoing behavior - safe to delete this file and its entry in theme.json
-// (and run `extensions.zsr-space-routing.run-pinned-tab-fix` cleanup below)
-// once you've used it.
+// One-time cleanup: resets pinned tabs whose container doesn't match their
+// own Space's Space Default Container. This is a temporary utility riding
+// along on the same Sine-loaded mod, not part of its ongoing behavior -
+// safe to delete this file and its entry in theme.json once you've used it.
 //
-// Triggered via about:config instead of the Browser Console: create these
-// two prefs there (the "+" control next to the search box lets you add a
-// Boolean pref that doesn't exist yet), then flip the trigger one to true.
-// It resets the trigger back to false once the run finishes. Results are
-// printed with console.log - viewable in the Browser Console's *output*
-// pane, which doesn't require typing anything into it.
-//
-//   extensions.zsr-space-routing.dry-run            (Boolean, default true if unset)
-//   extensions.zsr-space-routing.run-pinned-tab-fix (Boolean, create it, set true to run)
+// Neither the Browser Console's input line nor about:config's toggle
+// control were cooperating, so this needs no typing and no config UI at
+// all: press Ctrl+Alt+Shift+P anywhere in the browser window. It computes
+// what would change across every pinned tab in every window, shows a
+// native confirm dialog with the count and a short preview, and only
+// applies anything if you click OK.
 
-const { gZenSpaceRoutingManager } = ChromeUtils.importESModule(
-  "resource:///modules/zen/spacerouting/ZenSpaceRoutingManager.sys.mjs"
-);
+const KEY_COMBO = "p"; // with ctrl+alt+shift
 
-const DRY_RUN_PREF = "extensions.zsr-space-routing.dry-run";
-const TRIGGER_PREF = "extensions.zsr-space-routing.run-pinned-tab-fix";
+if (typeof window !== "undefined" && !window.__zsrPinnedTabFixKeyInstalled) {
+  window.__zsrPinnedTabFixKeyInstalled = true;
 
-if (!gZenSpaceRoutingManager.__zsrPinnedTabFixObserverInstalled) {
-  gZenSpaceRoutingManager.__zsrPinnedTabFixObserverInstalled = true;
-
-  Services.prefs.addObserver(TRIGGER_PREF, () => {
-    if (!Services.prefs.getBoolPref(TRIGGER_PREF, false)) {
-      return;
-    }
-    try {
-      runFix();
-    } finally {
-      Services.prefs.setBoolPref(TRIGGER_PREF, false);
-    }
-  });
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (
+        event.ctrlKey &&
+        event.altKey &&
+        event.shiftKey &&
+        event.key.toLowerCase() === KEY_COMBO
+      ) {
+        event.preventDefault();
+        runFix(window);
+      }
+    },
+    true
+  );
 
   console.log(
-    `[zsr-pinned-tab-fix] Ready. In about:config, create/set "${TRIGGER_PREF}" to true to run (check "${DRY_RUN_PREF}", default true, first).`
+    "[zsr-pinned-tab-fix] Ready. Press Ctrl+Alt+Shift+P to check/fix pinned tab containers."
   );
 }
 
-function runFix() {
-  const dryRun = Services.prefs.getBoolPref(DRY_RUN_PREF, true);
-  const results = { fixed: [], skipped: [], errors: [] };
+function collectMismatches() {
+  const mismatches = [];
+  const errors = [];
 
   const windows = Services.wm.getEnumerator("navigator:browser");
   while (windows.hasMoreElements()) {
@@ -64,13 +59,11 @@ function runFix() {
       try {
         const workspaceId = tab.getAttribute("zen-workspace-id");
         if (!workspaceId) {
-          results.skipped.push({ url, reason: "no zen-workspace-id" });
           continue;
         }
 
         const workspace = gZenWorkspaces.getWorkspaceFromId(workspaceId);
         if (!workspace) {
-          results.skipped.push({ url, reason: "workspace not found" });
           continue;
         }
 
@@ -84,43 +77,96 @@ function runFix() {
           continue;
         }
 
-        const entry = {
+        mismatches.push({
+          tab,
+          gBrowser,
           url,
           space: workspace.name,
+          workspaceId,
           from: currentContainerId,
           to: targetContainerId,
-        };
-
-        if (dryRun) {
-          results.fixed.push({ ...entry, dryRun: true });
-          continue;
-        }
-
-        const essential = tab.hasAttribute("zen-essential");
-        const index = tab._tPos;
-
-        gBrowser.addTrustedTab(url, {
-          pinned: true,
-          essential,
-          userContextId: targetContainerId,
-          zenWorkspaceId: workspaceId,
-          tabIndex: index,
-          skipAnimation: true,
+          essential: tab.hasAttribute("zen-essential"),
+          index: tab._tPos,
         });
-
-        gBrowser.removeTab(tab, { animate: false, skipPermitUnload: true });
-
-        results.fixed.push(entry);
       } catch (e) {
-        results.errors.push({ url, error: String(e) });
+        errors.push({ url, error: String(e) });
       }
     }
   }
 
+  return { mismatches, errors };
+}
+
+function runFix(promptWindow) {
+  const { mismatches, errors } = collectMismatches();
+
   console.log(
-    `[zsr-pinned-tab-fix] ${dryRun ? "DRY RUN - " : ""}fixed:`,
-    results.fixed
+    `[zsr-pinned-tab-fix] Found ${mismatches.length} pinned tab(s) to fix:`,
+    mismatches.map(({ url, space, from, to }) => ({ url, space, from, to }))
   );
-  console.log("[zsr-pinned-tab-fix] skipped:", results.skipped);
-  console.log("[zsr-pinned-tab-fix] errors:", results.errors);
+  if (errors.length) {
+    console.log("[zsr-pinned-tab-fix] errors while scanning:", errors);
+  }
+
+  if (mismatches.length === 0) {
+    Services.prompt.alert(
+      promptWindow,
+      "Pinned Tab Container Fix",
+      "All pinned tabs already match their Space's default container. Nothing to do."
+    );
+    return;
+  }
+
+  const preview = mismatches
+    .slice(0, 10)
+    .map((m) => `• ${m.url}  (container ${m.from} → ${m.to}, ${m.space})`)
+    .join("\n");
+  const more =
+    mismatches.length > 10 ? `\n...and ${mismatches.length - 10} more` : "";
+
+  const proceed = Services.prompt.confirm(
+    promptWindow,
+    "Pinned Tab Container Fix",
+    `${mismatches.length} pinned tab(s) don't match their Space's default container:\n\n${preview}${more}\n\n` +
+      `Apply now? Each one will close and reopen pinned in the same spot with the correct container - any session tied to its current (wrong) container will be lost.`
+  );
+
+  if (!proceed) {
+    console.log("[zsr-pinned-tab-fix] Cancelled - no changes made.");
+    return;
+  }
+
+  const applied = [];
+  const failed = [];
+
+  for (const m of mismatches) {
+    try {
+      m.gBrowser.addTrustedTab(m.url, {
+        pinned: true,
+        essential: m.essential,
+        userContextId: m.to,
+        zenWorkspaceId: m.workspaceId,
+        tabIndex: m.index,
+        skipAnimation: true,
+      });
+      m.gBrowser.removeTab(m.tab, { animate: false, skipPermitUnload: true });
+      applied.push(m);
+    } catch (e) {
+      failed.push({ url: m.url, error: String(e) });
+    }
+  }
+
+  console.log(
+    `[zsr-pinned-tab-fix] Applied ${applied.length} fix(es).`,
+    applied.map(({ url, space, from, to }) => ({ url, space, from, to }))
+  );
+  if (failed.length) {
+    console.log("[zsr-pinned-tab-fix] failed:", failed);
+  }
+
+  Services.prompt.alert(
+    promptWindow,
+    "Pinned Tab Container Fix",
+    `Done. Fixed ${applied.length} pinned tab(s)${failed.length ? `, ${failed.length} failed (see Browser Console)` : ""}.`
+  );
 }
