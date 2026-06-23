@@ -7,8 +7,8 @@ A local Zen Browser mod that lets a Space Routing rule pin matched tabs to a spe
 This ships as a [Sine](https://github.com/CosmoCreeper/Sine) mod, not a Zen Mod — Zen Mods are CSS-only and can't run the JS this needs (see [docs/adr/0002](./docs/adr/0002-delivery-via-js-loader-not-zen-mods.md)).
 
 1. Install Sine itself (one-time native installer): https://github.com/sineorg/docs/blob/main/src/installation.md
-2. In Zen, go to `about:config` and set `sine.allow-unsafe-js` to `true`. Sine only runs JS from non-store mods when this is enabled — required for any unpublished/private-repo mod, not specific to this one.
-3. This repo is already pushed to https://github.com/bheisenberg/zen-space-routing-containers (private).
+2. In Zen, go to `about:config` and set `sine.allow-unsafe-js` to `true`. Sine only runs JS from non-store mods when this is enabled — required for any unpublished mod, not specific to this one.
+3. This repo is already pushed to https://github.com/bheisenberg/zen-space-routing-containers and is **public** (required — Sine's installer fetches `raw.githubusercontent.com`/`codeload.github.com` unauthenticated, so a private repo just hangs with no error; see ADR 0002's addendum). "Local" here means not submitted to any mod marketplace, not private.
 4. In Sine's settings page, install by repo: enter `bheisenberg/zen-space-routing-containers`.
 5. Restart Zen.
 
